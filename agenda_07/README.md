@@ -1,43 +1,28 @@
 # Deployer Slow To Deploy Apps
 
+## Problem:
 
-### Useful SPL
-#### Events from the SHC Deployer
+### Slow SHC App Deployment
 
-##### Log Output:
-```
-{
-   component: ConfDeployment
-   data: { [-]
-     apps: [ [+]
-     ]
-     spent: 1.3209629999999999
-     status: succeeded
-     target_label: sh2
-     target_uri: https://192.168.48.106:8089
-     task: sendDeployableApps
-   }
-   datetime: 06-05-2023 18:07:50.177 +0000
-   log_level: INFO
-}
-```
-##### SPL:
-```
-index=_internal host=*deployer* sourcetype=splunkd_conf component=ConfDeployment data.task=sendDeployableApps data.status="*" data.target_label="*"
-| timechart span=1m count by data.status
-```
+When a SHC is trying to deploy a large bundle that has many apps and lookups to many SHC Members, it can take quite a while for it to deploy.
+
+## Cause:
+
+By default, the Deployer only uses a single thread to deploy the bundle to the SHC Members. The way the bundle is created is by it having a separate bundle for each app, calculates the checksum for each app (bundle), and it pushes out the bundles that the checksums do not match each member sequentially. When there are many apps, it takes a lot of time to check and extract each app from, and it does that for every member.
 
 ## Solution
 
-### How bundles are pushed to memebers.
-The Deployer creates tarball for each app, it queries `/services/shcluster/member/members` list of members, and pushes the tarballs to each member sequentually. 
-
 ### Parallelizing the Deployment
-Setting the `deployerPushThreads` allows you to set the maximum number of threads used on the deployer to push apps and configs to members. If you set it to auto, will tell the deployer to auto-tune the number of threads to one thread per member. and it will push those bundles to the members in parallel.
+Setting the `deployerPushThreads` allows you to set the maximum number of threads used on the deployer to push apps and configs to members. If you set it to `auto`, it will tell the deployer to auto-tune the number of threads to one thread per member. and it will push those bundles to the members in parallel. The app deployment itself is not parallelized.
 
 If you set it to a value higher than the number of members, it will only use as many threads as there are members in that SHC.
 
-#### Log output
+You can set it to a lower number if the Deployer is not sized to push out to that many members.
+
+### Log output
+
+Example of debug logs when using `deployerPushThreads = auto`. As you can see, in this case we have three SHC Members, and it creates a worker for each one of them.
+
 ```
 06-06-2023 12:48:52.471 +0000 DEBUG ConfReplication [308 AppsDeployDataProviderExecutorWorker-2] - sendDeployableAppsImpl target=https://192.168.48.106:8089, serverName=sh2
 06-06-2023 12:48:52.471 +0000 DEBUG ConfReplication [307 AppsDeployDataProviderExecutorWorker-1] - sendDeployableAppsImpl target=https://192.168.54.191:8089, serverName=sh3
